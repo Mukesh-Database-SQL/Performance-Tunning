@@ -1,0 +1,2334 @@
+Object
+
+The primary objective of SQL Server memory monitoring is to ensure that SQL Server has sufficient memory to execute queries efficiently, cache frequently accessed data, manage execution plans, and support concurrent database workloads.
+
+Memory is one of the most important resources in SQL Server. Improper memory configuration or memory pressure can cause slow query execution, excessive physical reads, query memory grant waits, and overall application performance degradation.
+
+Key objectives
+
+Monitor SQL Server memory utilization.
+
+Identify SQL Server memory consumption at instance level.
+
+Monitor Buffer Pool utilization.
+
+Identify memory pressure inside SQL Server.
+
+Monitor query memory grants.
+
+Identify queries waiting for memory.
+
+Monitor Plan Cache and Buffer Cache.
+
+Identify memory-intensive queries and execution plans.
+
+Monitor Windows OS memory availability.
+
+Identify memory-related waits and errors.
+
+Configure appropriate SQL Server max server memory.
+
+Prevent production incidents caused by insufficient memory.
+
+Expected outcome: A DBA should be able to identify whether SQL Server is experiencing memory pressure, determine which component is consuming memory, identify affected queries, and implement an appropriate corrective action.
+
+ Scope
+
+Memory monitoring should cover both SQL Server internal memory consumption and Windows operating system memory utilization.
+
+Monitoring area
+
+What to monitor
+
+Physical Memory
+
+Total server RAM
+
+Available Memory
+
+Available Windows memory
+
+SQL Server Memory
+
+Memory consumed by SQL Server
+
+Buffer Pool
+
+Data and index pages cached in memory
+
+Plan Cache
+
+Cached execution plans
+
+Memory Clerks
+
+Memory consumption by SQL Server components
+
+Query Memory Grants
+
+Memory allocated to executing queries
+
+Memory Grants Pending
+
+Queries waiting for memory
+
+PLE
+
+Buffer Pool page residency indicator
+
+Target vs Total Memory
+
+SQL Server memory allocation
+
+Max Server Memory
+
+Configured SQL Server memory limit
+
+Memory Nodes
+
+NUMA memory distribution
+
+Resource Semaphore
+
+Query workspace memory availability
+
+Scope boundaries
+
+A DBA should understand the difference between the following:
+
+OS Memory Pressure: Windows does not have sufficient available physical memory.
+
+SQL Server Memory Pressure: SQL Server cannot efficiently satisfy internal memory requirements.
+
+Buffer Pool Pressure: SQL Server cannot retain sufficient data pages in memory.
+
+Query Memory Pressure: Queries require workspace memory for operations such as sorting and hashing.
+
+Plan Cache Pressure: Cached execution plans are removed or reused due to memory management.
+
+External Memory Pressure: Other applications or processes compete with SQL Server for RAM.
+
+Important: High SQL Server memory consumption is not automatically a problem. SQL Server is designed to use available memory to cache data and improve performance.
+
+
+
+  Introdution and Overview
+
+
+
+SQL Server uses memory to store frequently accessed data pages, execution plans, internal structures, query workspace allocations, and other engine components.
+
+When an application executes a query, SQL Server attempts to retrieve the required data from memory rather than reading it repeatedly from disk.
+
+This improves query performance by reducing physical disk I/O.
+
+Why does SQL Server need memory?
+
+SQL Server primarily uses memory for:
+
+Buffer Pool – Data and index pages.
+
+Plan Cache – Cached execution plans.
+
+Query Execution – Memory grants for sorting and hashing.
+
+Lock Management – Lock-related structures.
+
+Connection Management – Session-related memory.
+
+Internal Engine Operations – Various internal allocations.
+
+Columnstore – Columnstore object and segment memory.
+
+In-Memory OLTP – Memory-optimized tables and indexes, when configured.
+
+Important memory terminology
+
+Term
+
+Explanation
+
+Buffer Pool
+
+Memory used to cache database pages
+
+Plan Cache
+
+Memory used to store compiled execution plans
+
+PLE
+
+Page Life Expectancy
+
+Memory Clerk
+
+SQL Server component responsible for tracking memory allocations
+
+Memory Grant
+
+Workspace memory allocated to a query
+
+Memory Grant Pending
+
+Query waiting for workspace memory
+
+Target Server Memory
+
+Memory SQL Server aims to use
+
+Total Server Memory
+
+Memory currently committed by SQL Server
+
+Max Server Memory
+
+Configured maximum memory limit
+
+Min Server Memory
+
+Configured minimum memory target
+
+Working Set
+
+Physical memory currently resident for a process
+
+Lazy Writer
+
+Background process that manages buffer pool memory
+
+Resource Semaphore
+
+Manages query workspace memory grants
+
+Important difference: Target Memory vs Total Memory
+
+These two metrics are extremely important for SQL Server DBAs.
+
+Target Server Memory: Amount of memory SQL Server would like to commit based on current conditions and configuration.
+
+Total Server Memory: Amount of memory SQL Server has currently committed.
+
+Scenario
+
+Interpretation
+
+Total = Target
+
+SQL Server has reached its current memory target
+
+Total below Target
+
+SQL Server may still be acquiring memory
+
+Total below Target with low OS memory
+
+Investigate OS pressure and configuration
+
+Total below Target with sufficient OS memory
+
+May simply be normal workload behavior
+
+Important: Total Server Memory being lower than Target Server Memory does not automatically indicate a problem. Similarly, equal values do not guarantee that sufficient memory is available for every workload.
+
+ Architecture
+
+
+
+
+Work Flow:--->
+             
+             Windows Operating System
+                       |
+                       v
+              Physical Server RAM
+                       |
+                       v
+             SQL Server Memory Manager
+                       |
+          +------------+------------+
+          |            |            |
+          v            v            v
+      Buffer Pool   Plan Cache   Query Workspace
+          |            |            |
+          v            v            v
+      Data Pages   Execution     Memory Grants
+      Index Pages    Plans        Sort / Hash
+          |            |            |
+          +------------+------------+
+                       |
+                       v
+               SQL Server Engine
+                       |
+                       v
+                Query Execution
+
+
+
+Important memory architecture components
+
+Memory Manager
+
+SQL Server Memory Manager manages memory allocations for the database engine.
+
+Its responsibilities include:
+
+Managing SQL Server memory consumption.
+
+Handling memory requests from internal components.
+
+Monitoring memory availability.
+
+Responding to operating system memory pressure.
+
+Managing memory within configured limits.
+
+Buffer Pool
+
+The Buffer Pool is one of the most important components of SQL Server memory.
+
+It stores:
+
+Data pages.
+
+Index pages.
+
+Database pages read from disk.
+
+Modified pages (dirty pages) waiting to be written to disk.
+
+Example:
+
+Suppose an application executes:
+
+SELECT *
+FROM dbo.Employee
+WHERE EmployeeID = 1001;
+
+If the required data page is already present in the Buffer Pool, SQL Server can read it from memory.
+
+If the page is not present, SQL Server reads it from the database files into memory.
+
+This is why sufficient Buffer Pool memory can reduce physical disk reads.
+
+Plan Cache
+
+Plan Cache stores compiled execution plans.
+
+When a query is executed again and SQL Server can reuse its cached plan, it may avoid compiling a new execution plan.
+
+Example:
+
+SELECT *
+FROM dbo.Employee
+WHERE EmployeeID = @EmployeeID;
+
+A reusable execution plan can reduce compilation overhead.
+
+However, excessive single-use ad hoc plans can consume memory unnecessarily.
+
+Query Execution Memory / Workspace Memory
+
+Certain query operators require additional workspace memory.
+
+Examples:
+
+Sort operations.
+
+Hash joins.
+
+Hash aggregation.
+
+Other memory-consuming query operators.
+
+SQL Server estimates the memory required for a query and requests a memory grant before executing the relevant operators.
+
+If sufficient workspace memory is unavailable, the query might wait on RESOURCE_SEMAPHORE.
+
+Memory Clerks
+
+Memory Clerks track memory consumption by different SQL Server components.
+
+Examples include:
+
+Memory clerk
+
+Purpose
+
+MEMORYCLERK_SQLBUFFERPOOL
+
+Buffer Pool
+
+CACHESTORE_SQLCP
+
+SQL plan cache
+
+CACHESTORE_OBJCP
+
+Object plan cache
+
+MEMORYCLERK_SQLQUERYEXEC
+
+Query execution
+
+MEMORYCLERK_SQLGENERAL
+
+General SQL Server allocations
+
+MEMORYCLERK_SQLCLR
+
+SQL CLR allocations
+
+The exact clerk names and their usage depend on SQL Server version and workload.
+
+SQL Server memory allocation concepts
+
+Component
+
+Purpose
+
+Buffer Pool
+
+Cache database pages
+
+Plan Cache
+
+Store compiled plans
+
+Query Memory Grants
+
+Execute memory-intensive operations
+
+Lock Manager
+
+Manage locks
+
+Columnstore
+
+Manage columnstore-related memory
+
+CLR
+
+Manage CLR-related memory
+
+In-Memory OLTP
+
+Support memory-optimized objects
+
+Important: max server memory controls the Buffer Pool and most SQL Server memory clerks, but not every allocation made by the SQL Server process. Always account for memory outside this limit when sizing a production server
+
+Prerequisites
+
+Before troubleshooting memory issues in production, a DBA should collect basic server configuration and memory utilization information.
+
+Required permissions
+
+SQL Server version
+
+Typical DMV permission
+
+SQL Server 2019 and earlier
+
+VIEW SERVER STATE
+
+SQL Server 2022 and later
+
+VIEW SERVER PERFORMANCE STATE for applicable performance DMVs
+
+For configuration changes, appropriate server-level permissions are also required.
+
+Required tools
+
+SQL Server Management Studio (SSMS).
+
+Windows Performance Monitor (PerfMon).
+
+SQL Server Error Logs.
+
+SQL Server Agent.
+
+Extended Events.
+
+Windows Task Manager or Resource Monitor.
+
+Monitoring tools such as SCOM, SQL Monitor or BMC Helix.
+
+Important Windows PerfMon counters
+
+Open perfmon.exe and monitor these counters.
+
+Object
+
+Counter
+
+Purpose
+
+Memory
+
+Available MBytes
+
+Available physical memory
+
+Memory
+
+Pages/sec
+
+Paging activity
+
+Memory
+
+Committed Bytes
+
+Committed virtual memory
+
+Process (sqlservr)
+
+Working Set
+
+Physical memory resident for SQL Server
+
+Process (sqlservr)
+
+Private Bytes
+
+Private committed memory
+
+SQLServer:Memory Manager
+
+Total Server Memory (KB)
+
+Current SQL Server memory
+
+SQLServer:Memory Manager
+
+Target Server Memory (KB)
+
+SQL Server memory target
+
+SQLServer:Memory Manager
+
+Memory Grants Pending
+
+Queries waiting for grants
+
+SQLServer:Memory Manager
+
+Memory Grants Outstanding
+
+Active memory grants
+
+SQLServer:Buffer Manager
+
+Page life expectancy
+
+Buffer Pool page residency
+
+SQLServer:Buffer Manager
+
+Lazy writes/sec
+
+Lazy writer activity
+
+SQLServer:Buffer Manager
+
+Free list stalls/sec
+
+Buffer page availability pressure
+
+SQLServer:Buffer Manager
+
+Database pages
+
+Cached database pages
+
+Important: PerfMon object names can vary by SQL Server instance configuration and version. For named instances, counters may use the appropriate instance name.
+
+Collect basic SQL Server configuration
+
+Query 1 – Check SQL Server version
+
+SELECT
+    @@SERVERNAME AS ServerName,
+    @@VERSION AS SQLServerVersion;
+
+Query 2 – Check physical and logical memory information
+
+SELECT
+    cpu_count AS LogicalCPUCount,
+    physical_memory_kb / 1024 AS PhysicalMemory_MB,
+    committed_kb / 1024 AS CommittedMemory_MB,
+    committed_target_kb / 1024 AS CommittedTarget_MB,
+    sqlserver_start_time
+FROM sys.dm_os_sys_info;
+
+Query 3 – Check current memory configuration
+
+SELECT
+    name,
+    value AS ConfiguredValue,
+    value_in_use AS ActiveValue
+FROM sys.configurations
+WHERE name IN
+(
+    'min server memory (MB)',
+    'max server memory (MB)'
+);
+
+Query 4 – Check Windows available memory
+
+SELECT
+    total_physical_memory_kb / 1024
+        AS TotalPhysicalMemory_MB,
+
+    available_physical_memory_kb / 1024
+        AS AvailablePhysicalMemory_MB,
+
+    system_memory_state_desc
+
+FROM sys.dm_os_sys_memory;
+
+Why is this important?
+
+Before changing memory configuration, a DBA should understand:
+
+Total physical RAM available.
+
+Windows memory consumption.
+
+SQL Server committed memory.
+
+Current max server memory setting.
+
+Other applications running on the server.
+
+Number of SQL Server instances.
+
+Whether the server uses NUMA architecture.
+
+ Action
+
+This is the most important section for a production SQL Server DBA.
+
+The recommended approach is to investigate memory from the operating system level to the individual SQL Server component and query level.
+
+Production memory troubleshooting workflow
+
+Check Windows available physical memory.
+
+Check SQL Server Total and Target Server Memory.
+
+Check SQL Server process memory consumption.
+
+Identify memory consumption by Memory Clerks.
+
+Monitor Buffer Pool and Page Life Expectancy.
+
+Check Memory Grants Pending and Outstanding.
+
+Identify queries waiting for memory.
+
+Analyze memory-related waits and errors.
+
+Review max server memory and workload configuration.
+
+Implement corrective actions and validate.
+
+Action 1 – Check SQL Server Total and Target Memory
+
+Easy DMV – Remember this first
+
+DMV: sys.dm_os_sys_info
+
+This DMV provides information about the SQL Server instance, including its current committed memory and target memory.
+
+SELECT
+    committed_kb / 1024
+        AS TotalServerMemory_MB,
+
+    committed_target_kb / 1024
+        AS TargetServerMemory_MB,
+
+    physical_memory_kb / 1024
+        AS PhysicalMemory_MB
+
+FROM sys.dm_os_sys_info;
+
+How to interpret the results:
+
+Metric
+
+Meaning
+
+Total Server Memory
+
+Currently committed memory
+
+Target Server Memory
+
+Memory SQL Server currently targets
+
+Physical Memory
+
+Physical RAM visible to SQL Server
+
+Example:
+
+Metric
+
+Value
+
+Physical Memory
+
+64 GB
+
+Total Server Memory
+
+48 GB
+
+Target Server Memory
+
+48 GB
+
+Interpretation:
+
+SQL Server has reached its current memory target. This is not automatically a memory problem. Check Windows available memory, query memory grants, and memory pressure indicators.
+
+Action 2 – Check SQL Server Process Memory
+
+Easy DMV – Process monitoring
+
+DMV: sys.dm_os_process_memory
+
+This DMV provides information about memory used by the SQL Server operating system process.
+
+SELECT
+    physical_memory_in_use_kb / 1024
+        AS SQL_Physical_Memory_MB,
+
+    large_page_allocations_kb / 1024
+        AS Large_Page_Allocations_MB,
+
+    locked_page_allocations_kb / 1024
+        AS Locked_Page_Allocations_MB,
+
+    virtual_address_space_reserved_kb / 1024
+        AS VAS_Reserved_MB,
+
+    virtual_address_space_committed_kb / 1024
+        AS VAS_Committed_MB,
+
+    virtual_address_space_available_kb / 1024
+        AS VAS_Available_MB,
+
+    page_fault_count,
+
+    memory_utilization_percentage,
+
+    process_physical_memory_low,
+
+    process_virtual_memory_low
+
+FROM sys.dm_os_process_memory;
+
+Important columns:
+
+physical_memory_in_use_kb: Physical memory currently used by SQL Server process.
+
+locked_page_allocations_kb: Memory allocated using locked pages.
+
+page_fault_count: Page fault information.
+
+process_physical_memory_low: Indicates SQL Server process physical memory pressure.
+
+process_virtual_memory_low: Indicates virtual memory pressure.
+
+Production scenario:
+
+Windows team reports that SQL Server is consuming almost all available RAM.
+
+DBA action:
+
+Check SQL Server process memory.
+
+Check Total and Target Server Memory.
+
+Check Windows available memory.
+
+Review max server memory.
+
+Investigate memory clerks.
+
+Determine whether memory consumption is expected or problematic.
+
+Important: Task Manager process memory and SQL Server Buffer Pool memory are not identical. SQL Server process memory can include allocations outside the Buffer Pool limit.
+
+Action 3 – Check Windows Operating System Memory
+
+Easy DMV – OS monitoring
+
+DMV: sys.dm_os_sys_memory
+
+This DMV provides operating system memory information visible to SQL Server.
+
+SELECT
+    total_physical_memory_kb / 1024
+        AS Total_RAM_MB,
+
+    available_physical_memory_kb / 1024
+        AS Available_RAM_MB,
+
+    total_page_file_kb / 1024
+        AS Total_PageFile_MB,
+
+    available_page_file_kb / 1024
+        AS Available_PageFile_MB,
+
+    system_memory_state_desc,
+
+    system_low_memory_signal_state,
+
+    system_high_memory_signal_state
+
+FROM sys.dm_os_sys_memory;
+
+What should a DBA check?
+
+Is available physical memory consistently low?
+
+Is the operating system reporting low memory?
+
+Is page file consumption increasing?
+
+Is another application consuming excessive memory?
+
+Is SQL Server competing with other instances?
+
+Resolution: Investigate the process consuming memory before reducing SQL Server memory allocation.
+
+Action 4 – Identify Memory Consumption by Memory Clerks
+
+Most important DMV – Advanced analysis
+
+DMV: sys.dm_os_memory_clerks
+
+This DMV helps identify which internal SQL Server component is consuming the most memory.
+
+SELECT TOP 20
+    type AS MemoryClerkType,
+
+    name AS MemoryClerkName,
+
+    SUM(pages_kb) / 1024.0
+        AS PagesMemory_MB,
+
+    SUM(virtual_memory_committed_kb) / 1024.0
+        AS VirtualMemoryCommitted_MB
+
+FROM sys.dm_os_memory_clerks
+
+GROUP BY
+    type,
+    name
+
+ORDER BY PagesMemory_MB DESC;
+
+Important memory clerks:
+
+Memory Clerk
+
+Purpose
+
+MEMORYCLERK_SQLBUFFERPOOL
+
+Buffer Pool memory
+
+CACHESTORE_SQLCP
+
+Ad hoc SQL plan cache
+
+CACHESTORE_OBJCP
+
+Stored procedure and object plan cache
+
+MEMORYCLERK_SQLQUERYEXEC
+
+Query execution allocations
+
+MEMORYCLERK_SQLGENERAL
+
+General SQL allocations
+
+MEMORYCLERK_SQLCLR
+
+CLR memory
+
+Production interpretation:
+
+Suppose you find:
+
+Memory Clerk
+
+Memory
+
+SQLBUFFERPOOL
+
+30 GB
+
+SQLQUERYEXEC
+
+5 GB
+
+SQLCP
+
+2 GB
+
+SQLCLR
+
+1 GB
+
+Interpretation:
+
+Buffer Pool is consuming the largest share.
+
+Query execution memory is also significant.
+
+Review active query memory grants.
+
+Check whether plan cache consumption is justified.
+
+Remember: Clerk values are not a complete accounting of process memory, and different clerk allocations should not be blindly added to Task Manager values.
+
+Action 5 – Check Buffer Pool Memory
+
+DMV: sys.dm_os_buffer_descriptors
+
+This DMV provides information about database pages currently present in the Buffer Pool.
+
+SELECT
+    DB_NAME(database_id) AS DatabaseName,
+
+    COUNT(*) AS CachedPages,
+
+    COUNT(*) * 8 / 1024.0
+        AS BufferPoolMemory_MB
+
+FROM sys.dm_os_buffer_descriptors
+
+WHERE database_id <> 32767
+
+GROUP BY database_id
+
+ORDER BY BufferPoolMemory_MB DESC;
+
+What does this query tell us?
+
+Which database is using the most Buffer Pool memory?
+
+How much memory is occupied by cached pages?
+
+Which database has a large in-memory footprint?
+
+Example:
+
+Database
+
+Buffer Pool Memory
+
+SalesDB
+
+20 GB
+
+FinanceDB
+
+10 GB
+
+HRDB
+
+5 GB
+
+This indicates the distribution of cached database pages, not necessarily which database is responsible for memory pressure.
+
+Action 6 – Monitor Page Life Expectancy (PLE)
+
+Important daily health-check counter
+
+PerfMon counter: SQLServer:Buffer Manager – Page life expectancy
+
+PLE estimates how long, in seconds, a data page is expected to remain in the Buffer Pool.
+
+A sudden and sustained drop can indicate memory pressure or a significant change in workload.
+
+Check PLE using T-SQL:
+
+SELECT
+    object_name,
+    counter_name,
+    instance_name,
+    cntr_value AS PageLifeExpectancy_Seconds
+
+FROM sys.dm_os_performance_counters
+
+WHERE counter_name = 'Page life expectancy';
+
+Interpretation:
+
+PLE behavior
+
+Interpretation
+
+Stable PLE
+
+Buffer Pool residency is relatively stable
+
+Sudden PLE drop
+
+Possible memory or workload pressure
+
+Repeated sharp drops
+
+Investigate workload and memory churn
+
+Low PLE with high physical reads
+
+Stronger reason to investigate Buffer Pool pressure
+
+Important: Do not blindly apply the historical 300-second PLE threshold to every server. Modern systems can have multiple NUMA nodes, different RAM sizes, and different workloads. Monitor PLE trends per memory node and compare against the normal baseline.
+
+Action 7 – Check Query Memory Grants
+
+Advanced DMV – Production troubleshooting
+
+DMV: sys.dm_exec_query_memory_grants
+
+This DMV provides information about query workspace memory requested, granted, used, and waiting.
+
+SELECT
+    session_id,
+
+    request_time,
+
+    grant_time,
+
+    requested_memory_kb / 1024.0
+        AS RequestedMemory_MB,
+
+    granted_memory_kb / 1024.0
+        AS GrantedMemory_MB,
+
+    required_memory_kb / 1024.0
+        AS RequiredMemory_MB,
+
+    used_memory_kb / 1024.0
+        AS UsedMemory_MB,
+
+    max_used_memory_kb / 1024.0
+        AS MaxUsedMemory_MB,
+
+    wait_time_ms,
+
+    wait_order,
+
+    is_next_candidate
+
+FROM sys.dm_exec_query_memory_grants
+
+ORDER BY requested_memory_kb DESC;
+
+Important columns:
+
+Column
+
+Meaning
+
+requested_memory_kb
+
+Requested memory
+
+granted_memory_kb
+
+Memory actually granted
+
+required_memory_kb
+
+Minimum required memory
+
+used_memory_kb
+
+Current memory usage
+
+max_used_memory_kb
+
+Maximum memory used
+
+wait_time_ms
+
+Memory grant waiting time
+
+grant_time
+
+Time the grant was received
+
+Production scenario:
+
+Application team reports that several queries are running slowly.
+
+DBA checks memory grants and identifies queries waiting for memory.
+
+Possible reasons:
+
+Large hash joins.
+
+Large sort operations.
+
+Excessive query concurrency.
+
+Poor cardinality estimates.
+
+Overestimated memory grants.
+
+Resolution:
+
+Review query execution plans.
+
+Check actual versus estimated row counts.
+
+Optimize joins and filters.
+
+Investigate memory grant feedback.
+
+Review concurrent workload.
+
+Consider Resource Governor if workload isolation is required.
+
+Action 8 – Identify Queries Waiting for Memory
+
+DMVs:
+
+sys.dm_exec_requests
+
+sys.dm_exec_sql_text
+
+sys.dm_exec_query_memory_grants
+
+SELECT
+    r.session_id,
+
+    r.status,
+
+    r.wait_type,
+
+    r.wait_time,
+
+    r.granted_query_memory * 8 / 1024.0
+        AS GrantedMemory_MB,
+
+    r.total_elapsed_time,
+
+    DB_NAME(r.database_id) AS DatabaseName,
+
+    st.text AS SQLStatement
+
+FROM sys.dm_exec_requests r
+
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) st
+
+WHERE r.wait_type = 'RESOURCE_SEMAPHORE'
+
+ORDER BY r.wait_time DESC;
+
+What does RESOURCE_SEMAPHORE mean?
+
+It indicates that a query is waiting for a workspace memory grant.
+
+When multiple queries request large memory grants concurrently, SQL Server might not have sufficient memory to grant all requests immediately.
+
+Action 9 – Check Memory Grants Pending and Outstanding
+
+DMV: sys.dm_os_performance_counters
+
+SELECT
+    counter_name,
+
+    cntr_value
+
+FROM sys.dm_os_performance_counters
+
+WHERE object_name LIKE '%:Memory Manager%'
+
+AND counter_name IN
+(
+    'Memory Grants Pending',
+    'Memory Grants Outstanding',
+    'Total Server Memory (KB)',
+    'Target Server Memory (KB)'
+);
+
+Interpretation:
+
+Counter
+
+Expected behavior
+
+Memory Grants Pending
+
+Ideally 0
+
+Memory Grants Outstanding
+
+Depends on workload
+
+Total Server Memory
+
+Current committed memory
+
+Target Server Memory
+
+Current memory target
+
+Important: Memory Grants Pending remaining above zero for a sustained period should trigger investigation. A single nonzero sample is not sufficient to establish a production incident.
+
+Action 10 – Check Plan Cache Memory Consumption
+
+DMVs:
+
+sys.dm_exec_cached_plans
+
+sys.dm_os_memory_cache_counters
+
+First, check cache memory:
+
+SELECT
+    type,
+
+    name,
+
+    pages_kb / 1024.0
+        AS CacheMemory_MB,
+
+    entries_count
+
+FROM sys.dm_os_memory_cache_counters
+
+ORDER BY pages_kb DESC;
+
+Identify single-use ad hoc plans:
+
+SELECT
+    objtype,
+
+    cacheobjtype,
+
+    COUNT(*) AS PlanCount,
+
+    SUM(size_in_bytes) / 1024.0 / 1024
+        AS PlanCacheMemory_MB
+
+FROM sys.dm_exec_cached_plans
+
+GROUP BY
+    objtype,
+    cacheobjtype
+
+ORDER BY PlanCacheMemory_MB DESC;
+
+Possible issue:
+
+Thousands of single-use ad hoc plans can consume unnecessary plan cache memory.
+
+Resolution:
+
+Parameterize repetitive queries.
+
+Review application SQL generation.
+
+Investigate unnecessary plan creation.
+
+Evaluate optimize for ad hoc workloads after analyzing the workload.
+
+Action 11 – Check SQL Server Memory-Related Wait Statistics
+
+DMV: sys.dm_os_wait_stats
+
+SELECT
+    wait_type,
+
+    waiting_tasks_count,
+
+    wait_time_ms / 1000.0
+        AS WaitTime_Seconds,
+
+    signal_wait_time_ms / 1000.0
+        AS SignalWait_Seconds
+
+FROM sys.dm_os_wait_stats
+
+WHERE wait_type IN
+(
+    'RESOURCE_SEMAPHORE',
+    'RESOURCE_SEMAPHORE_QUERY_COMPILE',
+    'MEMORY_ALLOCATION_EXT',
+    'CMEMTHREAD'
+)
+
+ORDER BY wait_time_ms DESC;
+
+Wait type
+
+Meaning
+
+Investigation
+
+RESOURCE_SEMAPHORE
+
+Query waiting for workspace memory
+
+Memory grants
+
+RESOURCE_SEMAPHORE_QUERY_COMPILE
+
+Query compilation memory pressure
+
+Compilation workload
+
+MEMORY_ALLOCATION_EXT
+
+Internal memory allocation waiting
+
+Memory allocation pressure
+
+CMEMTHREAD
+
+Contention around memory object allocation
+
+Memory object contention
+
+Important: Wait statistics are cumulative and need to be compared across a defined observation interval. Not every memory-related wait indicates that the server needs more RAM.
+
+Action 12 – Check SQL Server Memory Configuration and MAX Server Memory
+
+Important – Production configuration
+
+Purpose: Ensure SQL Server does not consume memory required by Windows or other applications.
+
+Check the current settings:
+
+SELECT
+    name,
+    value AS ConfiguredValue_MB,
+    value_in_use AS ActiveValue_MB
+FROM sys.configurations
+WHERE name IN
+(
+    'min server memory (MB)',
+    'max server memory (MB)'
+);
+
+How to configure MAX Server Memory
+
+Example: Suppose you have calculated and approved 48 GB as the appropriate SQL Server memory limit.
+
+EXEC sp_configure 'show advanced options', 1;
+RECONFIGURE;
+
+EXEC sp_configure 'max server memory (MB)', 49152;
+RECONFIGURE;
+
+Example only: 49,152 MB = 48 GB. Do not copy this value without calculating the requirements of your actual server.
+
+Important considerations before changing MAX Server Memory:
+
+Check total physical RAM.
+
+Reserve sufficient memory for Windows.
+
+Account for other SQL Server instances.
+
+Account for backup buffers and other external allocations.
+
+Review SQL Server process memory outside the configured limit.
+
+Consider SQL Server workload and peak memory requirements.
+
+Obtain change approval and monitor after implementation.
+
+Microsoft provides a memory sizing methodology that accounts for OS requirements, thread stacks, and allocations outside the max server memory limit. A flat 75% allocation is only a rough starting point, not a universal rule.
+
+Microsoft Learn+1
+
+
+
+Action 13 – Check Memory Distribution Across NUMA Nodes
+
+DMV: sys.dm_os_memory_nodes
+
+On servers with NUMA architecture, SQL Server manages memory across multiple memory nodes.
+
+SELECT
+    memory_node_id,
+
+    virtual_address_space_reserved_kb / 1024.0
+        AS VAS_Reserved_MB,
+
+    virtual_address_space_committed_kb / 1024.0
+        AS VAS_Committed_MB,
+
+    locked_page_allocations_kb / 1024.0
+        AS LockedPages_MB,
+
+    pages_kb / 1024.0
+        AS Pages_MB
+
+FROM sys.dm_os_memory_nodes
+
+ORDER BY memory_node_id;
+
+Why is this important?
+
+Understand memory distribution across NUMA nodes.
+
+Identify uneven memory allocation patterns.
+
+Investigate NUMA-related performance issues.
+
+Correlate memory behavior with scheduler and CPU topology.
+
+Do not assume that uneven memory values automatically indicate a problem. Review the workload and NUMA configuration.
+
+ Troubleshooting
+
+A production DBA should not immediately restart SQL Server or increase RAM whenever memory utilization is high.
+
+First identify the type of memory pressure.
+
+Scenario 1 – SQL Server is consuming almost 95–100% of server RAM
+
+High Priority
+
+Problem statement:
+
+Windows team reports that SQL Server is consuming almost all physical RAM, and other applications on the server are responding slowly.
+
+Possible root causes:
+
+SQL Server max server memory is not configured appropriately.
+
+Buffer Pool has grown to its memory target.
+
+Another SQL Server instance is consuming memory.
+
+Memory allocations outside the configured limit are high.
+
+Other Windows applications are consuming RAM.
+
+Memory leak in an external component or application.
+
+Troubleshooting steps:
+
+Step
+
+DBA action
+
+1
+
+Check Windows available RAM
+
+2
+
+Check SQL Server process memory
+
+3
+
+Check Total and Target Server Memory
+
+4
+
+Review MAX Server Memory
+
+5
+
+Identify top memory clerks
+
+6
+
+Check other applications and SQL instances
+
+7
+
+Review Windows memory pressure indicators
+
+8
+
+Apply an approved corrective action
+
+Resolution:
+
+Configure an appropriate MAX Server Memory value.
+
+Investigate external memory allocations.
+
+Review competing applications.
+
+Add RAM if the legitimate workload exceeds capacity.
+
+Monitor memory usage after the change.
+
+Important: SQL Server consuming most of its configured memory is normally expected. The real issue is whether Windows or SQL Server is experiencing memory pressure.
+
+Scenario 2 – Memory Grants Pending is continuously increasing
+
+High Priority
+
+Problem statement:
+
+Application team reports slow query execution. DBA observes that Memory Grants Pending is increasing.
+
+Possible root causes:
+
+Large hash joins.
+
+Large sorting operations.
+
+Queries requesting excessive memory.
+
+Concurrent memory-intensive queries.
+
+Poor cardinality estimates.
+
+Insufficient workspace memory.
+
+Troubleshooting steps:
+
+Check Memory Grants Pending in PerfMon.
+
+Execute sys.dm_exec_query_memory_grants.
+
+Identify queries waiting for memory.
+
+Check RESOURCE_SEMAPHORE waits.
+
+Review actual execution plans.
+
+Compare requested memory with actual usage.
+
+Investigate concurrent workload.
+
+Resolution:
+
+Optimize expensive queries.
+
+Reduce unnecessary sorting and hashing.
+
+Improve cardinality estimates.
+
+Review indexes and query design.
+
+Evaluate memory grant feedback.
+
+Increase available memory only if the workload genuinely requires it.
+
+Scenario 3 – Page Life Expectancy suddenly drops
+
+Problem statement:
+
+The DBA observes that PLE was stable earlier but suddenly dropped from 2,000 seconds to 100 seconds.
+
+Possible reasons:
+
+Large reporting queries.
+
+Index rebuild operations.
+
+Large table scans.
+
+Memory pressure.
+
+Workload spikes.
+
+Sudden increase in data access.
+
+Troubleshooting steps:
+
+Check PLE trend.
+
+Check Buffer Pool counters.
+
+Check Windows available memory.
+
+Identify queries with high logical reads.
+
+Review recent maintenance jobs.
+
+Check memory clerks.
+
+Compare the current workload with the normal baseline.
+
+Resolution:
+
+Optimize large scans.
+
+Review indexing strategy.
+
+Schedule maintenance appropriately.
+
+Investigate workload changes.
+
+Add memory if capacity is genuinely insufficient.
+
+Remember: PLE dropping is a symptom, not a diagnosis. A single PLE value cannot confirm memory pressure.
+
+Scenario 4 – RESOURCE_SEMAPHORE wait is increasing
+
+Problem statement:
+
+Application team reports that queries are taking longer than normal. Several sessions show RESOURCE_SEMAPHORE.
+
+Possible reasons:
+
+Queries requesting large memory grants.
+
+Excessive concurrent queries.
+
+Incorrect row estimates.
+
+Memory grant overestimation.
+
+Workspace memory pressure.
+
+DBA action:
+
+Execute:
+
+SELECT
+    session_id,
+    requested_memory_kb / 1024.0
+        AS RequestedMemory_MB,
+    granted_memory_kb / 1024.0
+        AS GrantedMemory_MB,
+    used_memory_kb / 1024.0
+        AS UsedMemory_MB,
+    wait_time_ms,
+    wait_order
+FROM sys.dm_exec_query_memory_grants
+ORDER BY requested_memory_kb DESC;
+
+Resolution:
+
+Find the queries with the largest grants.
+
+Check actual versus estimated row counts.
+
+Review hash and sort operators.
+
+Investigate query memory grant feedback.
+
+Optimize workload concurrency.
+
+Scenario 5 – SQL Server memory consumption suddenly increases after deployment
+
+Problem statement:
+
+After a new application release, SQL Server memory utilization increases significantly.
+
+Possible reasons:
+
+New queries requesting larger memory grants.
+
+New reporting operations.
+
+Excessive ad hoc plan generation.
+
+New data-processing workload.
+
+Increased application concurrency.
+
+A change in query execution plans.
+
+Troubleshooting steps:
+
+Compare memory usage before and after deployment.
+
+Review Query Store.
+
+Check memory grants.
+
+Check memory clerks.
+
+Review plan cache.
+
+Identify newly introduced queries.
+
+Compare execution plans.
+
+Resolution:
+
+Work with the application team to optimize the new workload and roll back or correct problematic changes when necessary.
+
+Scenario 6 – SQL Server memory usage is low, but application is slow
+
+Problem statement:
+
+SQL Server memory utilization is low, but the application team reports slow performance.
+
+Possible reasons:
+
+Disk I/O bottleneck.
+
+CPU bottleneck.
+
+Blocking.
+
+Network latency.
+
+Query execution plan regression.
+
+Application-side delays.
+
+DBA action:
+
+Check active requests:
+
+SELECT
+    session_id,
+    status,
+    wait_type,
+    wait_time,
+    blocking_session_id,
+    cpu_time,
+    total_elapsed_time,
+    granted_query_memory
+FROM sys.dm_exec_requests
+WHERE session_id <> @@SPID
+ORDER BY total_elapsed_time DESC;
+
+Resolution: Identify the actual bottleneck. Do not increase RAM simply because an application is slow.
+
+A DBA should follow a structured approach before implementing memory-related changes.
+
+Priority
+
+Action
+
+Risk
+
+P1
+
+Check OS available memory
+
+Low
+
+P1
+
+Check Total and Target Server Memory
+
+Low
+
+P1
+
+Check process memory
+
+Low
+
+P1
+
+Identify top memory clerks
+
+Low
+
+P1
+
+Check Memory Grants Pending
+
+Low
+
+P1
+
+Check RESOURCE_SEMAPHORE waits
+
+Low
+
+P2
+
+Analyze expensive queries
+
+Low
+
+P2
+
+Review query memory grants
+
+Medium
+
+P2
+
+Review plan cache consumption
+
+Medium
+
+P2
+
+Review MAX Server Memory
+
+Medium
+
+P3
+
+Change MAX Server Memory
+
+Medium to high
+
+P3
+
+Enable LPIM after diagnosis
+
+Medium
+
+P3
+
+Increase physical RAM
+
+Infrastructure change
+
+10.1 Before implementing any production change
+
+Capture current memory utilization.
+
+Record Total and Target Server Memory.
+
+Check available Windows memory.
+
+Capture memory clerk information.
+
+Identify memory-intensive queries.
+
+Review memory grant requirements.
+
+Check application workload.
+
+Obtain required change approval.
+
+Prepare a rollback plan.
+
+Validate memory performance after implementation.
+
+10.2 Memory monitoring baseline
+
+Establish a normal workload baseline before defining alert thresholds.
+
+Metric
+
+Monitoring approach
+
+Total Server Memory
+
+Continuous monitoring
+
+Target Server Memory
+
+Continuous monitoring
+
+Available RAM
+
+Windows PerfMon
+
+Memory Grants Pending
+
+Continuous monitoring
+
+PLE
+
+Trend-based monitoring
+
+Lazy Writes/sec
+
+Trend-based monitoring
+
+Free List Stalls/sec
+
+Trend-based monitoring
+
+Memory Clerks
+
+Periodic DMV collection
+
+RESOURCE_SEMAPHORE
+
+Wait-stat monitoring
+
+SQL Process Memory
+
+Continuous monitoring
+
+Microsoft recommends using both operating system and SQL Server internal diagnostics to troubleshoot memory pressure.
+
+Microsoft Learn+1
+
+
+
+11. MASTER MEMORY DIAGNOSTIC QUERY – Production Quick Reference
+
+The following query combines important memory indicators into one diagnostic output.
+
+SELECT
+    SYSDATETIME() AS CollectionTime,
+
+    physical_memory_kb / 1024
+        AS PhysicalMemory_MB,
+
+    committed_kb / 1024
+        AS TotalServerMemory_MB,
+
+    committed_target_kb / 1024
+        AS TargetServerMemory_MB,
+
+    (
+        SELECT available_physical_memory_kb / 1024
+        FROM sys.dm_os_sys_memory
+    ) AS OSAvailableMemory_MB,
+
+    (
+        SELECT physical_memory_in_use_kb / 1024
+        FROM sys.dm_os_process_memory
+    ) AS SQLProcessMemory_MB,
+
+    (
+        SELECT COUNT(*)
+        FROM sys.dm_exec_query_memory_grants
+        WHERE grant_time IS NULL
+    ) AS WaitingMemoryGrantRequests,
+
+    (
+        SELECT COUNT(*)
+        FROM sys.dm_exec_query_memory_grants
+        WHERE grant_time IS NOT NULL
+    ) AS GrantedMemoryRequests
+
+FROM sys.dm_os_sys_info;
+
+When to use:
+
+Daily SQL Server health checks.
+
+Application performance incidents.
+
+Memory utilization alerts.
+
+Production troubleshooting.
+
+Before and after memory configuration changes.
+
+Important: This query provides a point-in-time snapshot. It does not replace historical monitoring, memory clerk analysis, or PerfMon data.
+
+ Roll Back
+
+
+
+Real-world scenarios.
+
+Incident examples.
+
+Symptoms and impact.
+
+Root cause.
+
+Resolution.
+
+Lessons learned.
+
+INTERVIEW QUESTIONS – SQL Server Memory Monitoring
+
+These are important questions for a SQL Server DBA with 5 years of experience.
+
+How does SQL Server manage memory?
+
+What is the Buffer Pool?
+
+What is the difference between Total Server Memory and Target Server Memory?
+
+What is MAX Server Memory?
+
+What is the difference between MIN and MAX Server Memory?
+
+What is Page Life Expectancy?
+
+How do you troubleshoot low PLE?
+
+What are SQL Server Memory Clerks?
+
+How do you identify which component consumes the most memory?
+
+What is a query memory grant?
+
+What is RESOURCE_SEMAPHORE?
+
+What is Memory Grants Pending?
+
+How do you identify queries waiting for memory?
+
+What is the difference between SQL Server process memory and Buffer Pool memory?
+
+What is Lock Pages in Memory?
+
+What is the purpose of Lazy Writer?
+
+What is the difference between Lazy Writer and Checkpoint?
+
+What is plan cache memory?
+
+How do you identify single-use ad hoc plans?
+
+How do you troubleshoot SQL Server Error 701?
+
+What causes Error 8645?
+
+How do you configure MAX Server Memory in a production environment?
+
+How do NUMA nodes affect SQL Server memory?
+
+How does Memory Grant Feedback work?
+
+How do you identify SQL Server memory pressure?
+
+
+
+FINAL DBA TAKEAWAY
+
+Remember these five steps whenever SQL Server memory pressure occurs:
+
+OS → PROCESS → CLERK → GRANT → QUERY
+
+Check Windows available memory.
+
+Check SQL Server process memory.
+
+Identify memory-consuming components using Memory Clerks.
+
+Check memory grants and RESOURCE_SEMAPHORE.
+
+Optimize the queries or correct the actual memory constraint.
+
+Golden rule: High SQL Server memory consumption does not necessarily mean a memory problem. Identify actual memory pressure before changing server configuration or increasing RAM.  Related links 
+
+This section is designed as a DBA revision sheet.
+
+Five easy DMVs to remember
+
+Beginner / Daily monitoring
+
+No.
+
+DMV
+
+Purpose
+
+Memory shortcut
+
+1
+
+sys.dm_os_sys_info
+
+SQL Server memory target and committed memory
+
+Total / Target
+
+2
+
+sys.dm_os_process_memory
+
+SQL Server process memory
+
+Process
+
+3
+
+sys.dm_os_sys_memory
+
+Windows available memory
+
+OS
+
+4
+
+sys.dm_os_memory_clerks
+
+Component-level memory consumption
+
+Clerk
+
+5
+
+sys.dm_exec_query_memory_grants
+
+Query memory grants
+
+Grants
+
+Easy memory formula:
+
+TOTAL → PROCESS → OS → CLERK → GRANTS
+
+Advanced DMVs for production troubleshooting
+
+Intermediate / Advanced DBA
+
+DMV
+
+Purpose
+
+sys.dm_os_buffer_descriptors
+
+Buffer Pool page analysis
+
+sys.dm_os_memory_nodes
+
+NUMA memory distribution
+
+sys.dm_os_memory_cache_counters
+
+Cache memory consumption
+
+sys.dm_os_performance_counters
+
+Memory performance counters
+
+sys.dm_exec_requests
+
+Current executing queries
+
+sys.dm_exec_query_memory_grants
+
+Memory grant analysis
+
+sys.dm_exec_cached_plans
+
+Plan cache analysis
+
+sys.dm_os_wait_stats
+
+Memory-related wait analysis
+
+sys.dm_os_waiting_tasks
+
+Current waiting tasks
+
+sys.dm_exec_query_stats
+
+Cached query performance
+
+sys.dm_exec_query_plan
+
+Query execution plans
+
+One important query for identifying memory-intensive stored procedures
+
+SELECT TOP 20
+    DB_NAME(database_id) AS DatabaseName,
+
+    OBJECT_NAME(object_id, database_id)
+        AS ProcedureName,
+
+    execution_count,
+
+    total_worker_time / 1000
+        AS TotalCPU_MS,
+
+    total_elapsed_time / 1000
+        AS TotalElapsed_MS,
+
+    total_logical_reads,
+
+    last_execution_time
+
+FROM sys.dm_exec_procedure_stats
+
+ORDER BY total_logical_reads DESC;
+
+This identifies stored procedures with high cumulative logical reads. It is a useful starting point for identifying potentially expensive workloads, but it does not directly measure each procedure's memory consumption.
+
+
+
+Known Error
+
+Memory-related problems can generate SQL Server errors, warnings, or performance symptoms.
+
+The following errors are important for production DBAs.
+
+Error / Symptom
+
+Meaning
+
+DBA action
+
+Error 701
+
+Insufficient system memory in a resource pool
+
+Check memory clerks and available memory
+
+Error 802
+
+Insufficient memory available in Buffer Pool
+
+Investigate Buffer Pool and OS pressure
+
+Error 8645
+
+Timeout waiting for memory resources
+
+Check memory grants and RESOURCE_SEMAPHORE
+
+Error 17890
+
+Significant SQL Server process memory paged out
+
+Investigate OS paging and LPIM
+
+RESOURCE_SEMAPHORE
+
+Query waiting for memory grant
+
+Identify memory-intensive queries
+
+Low PLE
+
+Possible Buffer Pool pressure
+
+Check PLE trend and physical reads
+
+Memory Grants Pending
+
+Queries waiting for workspace memory
+
+Investigate query grants
+
+High Plan Cache Usage
+
+Excessive cached plans
+
+Investigate ad hoc query workload
+
+Error 701 – Insufficient system memory
+
+Error description:
+
+SQL Server cannot allocate the memory required for an operation.
+
+Possible reasons:
+
+SQL Server memory pressure.
+
+Excessive memory allocations.
+
+Insufficient available memory.
+
+Memory pool limitations.
+
+External memory consumption.
+
+DBA action:
+
+Check SQL Server Error Log.
+
+Check sys.dm_os_memory_clerks.
+
+Check Windows available memory.
+
+Check SQL Server process memory.
+
+Review MAX Server Memory.
+
+Investigate the component requesting memory.
+
+Error 802 – Insufficient Buffer Pool Memory
+
+Error description:
+
+SQL Server cannot obtain sufficient memory from the Buffer Pool to complete an operation.
+
+Possible reasons:
+
+Buffer Pool memory pressure.
+
+Insufficient available physical RAM.
+
+Memory configuration issues.
+
+Excessive memory requirements.
+
+Resolution:
+
+Check Buffer Pool consumption.
+
+Review OS memory availability.
+
+Identify memory-intensive queries.
+
+Review memory configuration.
+
+Consider increasing RAM if workload requirements justify it.
+
+Error 8645 – Memory Grant Timeout
+
+Important production error
+
+Error description:
+
+A query times out while waiting for memory resources required for execution.
+
+Possible reasons:
+
+Multiple concurrent memory-intensive queries.
+
+Excessive memory grants.
+
+Insufficient workspace memory.
+
+Poor query execution plans.
+
+DBA action:
+
+Check the memory grant queue:
+
+SELECT
+    session_id,
+    requested_memory_kb / 1024.0
+        AS RequestedMemory_MB,
+    granted_memory_kb / 1024.0
+        AS GrantedMemory_MB,
+    wait_time_ms,
+    wait_order
+FROM sys.dm_exec_query_memory_grants
+ORDER BY wait_time_ms DESC;
+
+Then review execution plans and query concurrency.
+
+Error 17890 – SQL Server Process Memory Paged Out
+
+Error description:
+
+A significant part of SQL Server process memory has been paged out, potentially causing performance degradation.
+
+Possible reasons:
+
+Windows operating system memory pressure.
+
+Incorrect memory allocation.
+
+External applications competing for RAM.
+
+SQL Server working-set trimming.
+
+DBA action:
+
+Check Windows available RAM.
+
+Check SQL Server process memory.
+
+Review MAX Server Memory.
+
+Check SQL Server service account permissions.
+
+Evaluate Lock Pages in Memory (LPIM).
+
+Review operating system memory pressure.
+
+Important: LPIM should be considered when there is evidence of SQL Server memory paging. It should not be enabled blindly. Ensure MAX Server Memory leaves sufficient memory for Windows and other allocations.
+
